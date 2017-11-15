@@ -17,7 +17,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
 from tensorflow.examples.tutorials.mnist import input_data
 def main(_):
-    mnist = input_data.read_data_sets(FLAGS.data_dir, one_hot = True)
+    mnist = input_data.read_data_sets("FLAG.data_dir", one_hot = True)
     full_data_x = mnist.train.images
 
     #Parameters
@@ -32,10 +32,10 @@ def main(_):
     y = tf.placeholder(tf.float32, shape = [None, num_calsses])
 
     # Build KMeans graph
-    kmeans = KMeans(input = x, num_clusters = k, distance_metric = 'cosine',
+    kmeans = KMeans(inputs = x, num_clusters = k, distance_metric = 'cosine',
                     use_mini_batch = True)
 
-    (all_scores, cluster_idx, scores, cluster_centers_initialized, init_op,
+    (all_scores,cluster_idx, scores, cluster_centers_initialized, init_op,
     train_op) = kmeans.training_graph()
     cluster_idx = cluster_idx[0] # fix for cluster_idx being a tuple
     avg_distance = tf.reduce_mean(scores)
@@ -81,7 +81,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_dir', type=str, default='/tmp/tensorflow/mnist/input_data',
                           help='Directory for storing input data')
     FLAGS, unparsed = parser.parse_known_args()
-    tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
+    tf.app.run(main=main, argv=[sys.argv[1]] + unparsed)
 
 
 

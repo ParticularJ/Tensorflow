@@ -17,6 +17,7 @@ def main(_):
     mnist = input_data.read_data_sets("FLAG.data_dir", one_hot = True)
 
     # Creat the model
+    # Here None means that a dimension can be of any length.
     x = tf.placeholder(tf.float32, [None, 784])
     W = tf.Variable(tf.zeros([784, 10]))
     b = tf.Variable(tf.zeros([10]))
@@ -37,6 +38,7 @@ def main(_):
 
     cross_entropy = tf.reduce_mean(
         tf.nn.softmax_cross_entropy_with_logits(labels = y_, logits = y))
+    # 0.5 is learning_rate
     train_step = tf.train.GradientDescentOptimizer(0.5).minimize(cross_entropy)
 
     sess = tf.InteractiveSession()
