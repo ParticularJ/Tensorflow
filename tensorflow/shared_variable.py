@@ -23,3 +23,7 @@ print("x4:", x4.op.name)
 print("x5:", x5.op.name)
 
 print(x0 is x3 and x3 is x5)
+
+
+
+
