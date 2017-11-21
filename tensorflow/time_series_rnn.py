@@ -6,6 +6,7 @@ import numpy as np
 n_steps = 20
 n_inputs = 1
 n_neurons = 100
+n_layers = 3
 n_outputs = 1
 # create a time series
 
@@ -28,6 +29,9 @@ X_batch, y_batch = next_batch(1, n_steps)
 X = tf.placeholder(tf.float32, [None, n_steps, n_inputs])
 y = tf.placeholder(tf.float32, [None, n_steps, n_outputs])
 
+
+# use dorpout
+keep_prob = tf.placeholder_with_default(1.0, shape = ())
 # outputprojectionwrapper函数的作用：
 # 比如我们现在每一次输出有向量为100，但是我们只想要1个
 # 在每一个输出上添加一个全连接层，这些全连接层共享W，b
@@ -48,8 +52,12 @@ to [batch_size, n_steps, n_outputs] .
 '''
 
 from tensorflow.contrib.layers import fully_connected
-cell = tf.contrib.rnn.BasicRNNCell(num_units = n_neurons, activation = tf.nn.relu)
-rnn_outputs, states = tf.nn.dynamic_rnn(cell, X, dtype = tf.float32)
+cells = [tf.contrib.rnn.BasicRNNCell(num_units = n_neurons, activation = tf.nn.relu)
+            for layer in range(n_layers)]
+cells_drop = [tf.contrib.rnn.DropoutWrapper(cell, input_keep_prob = keep_prob)
+                for cell in cells]
+multi_layer_cell = tf.contrib.rnn.MultiRNNCell(cells_drop)
+rnn_outputs, states = tf.nn.dynamic_rnn(multi_layer_cell, X, dtype = tf.float32)
 stacked_rnn_outputs = tf.reshape(rnn_outputs, [-1, n_neurons])
 stacked_outputs = fully_connected(stacked_rnn_outputs, n_outputs, activation_fn = None)
 outputs = tf.reshape(stacked_outputs, [-1, n_steps, n_outputs])
