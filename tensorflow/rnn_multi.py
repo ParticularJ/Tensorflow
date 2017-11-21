@@ -29,6 +29,12 @@ output_seqs, state = tf.nn.static_rnn(basic_cell, X_seqs, dtype = tf.float32)
 # swap the first two dimensions to get  a final outputs tensor of shape[None ,n_steps, n_neurons]
 outputs = tf.transpose(tf.stack(output_seqs), perm = [1, 0, 2])
 
+# Another method get rid of OOM
+# 使用dynamic_rnn()函数，该函数使用while循环，不需要转置，stack，unstack操作
+
+outputs, states = tf.nn.dynamic_rnn(basic_cell, X, dtype = tf.float32)
+
+
 init = tf.global_variables_initializer()
 
 import numpy as np 
