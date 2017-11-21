@@ -23,6 +23,7 @@ images = image_grayscale.reshape(1, height, width, 1)
 # Create 2 filters
 # shape(filter height, filter width, channels, # filters)
 fmap = np.zeros(shape = (7, 7, 1, 2), dtype = np.float32)
+# 分别把第三列和第三行赋值为1
 fmap[:, 3, :, 0] = 1; #vertical line
 fmap[3, :, :, 1] = 1; #horizontal line
 
@@ -30,6 +31,7 @@ def plot_image(image):
     # 图片的插值方法。
     plt.imshow(image, cmap = "gray", interpolation="nearest")
     plt.axis("off")
+
     
 plot_image(fmap[:, :, 0, 0])
 plt.show()

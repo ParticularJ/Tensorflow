@@ -26,6 +26,7 @@ n_outputs = 10
 # define input
 with tf.name_scope("inputs"):
     X = tf.placeholder(tf.float32, shape = [None, n_inputs], name = "X")
+    # -1 自动判别合适的大小
     X_reshaped = tf.reshape(X, shape = [-1, height, width, channels])
     y = tf.placeholder(tf.int32, shape = [None], name = "y")
 
@@ -37,6 +38,7 @@ conv2 = tf.layers.conv2d(conv1, filters = conv2_fmaps, kernel_size = conv2_ksize
                          activation = tf.nn.relu, name = "conv2")
 
 with tf.name_scope("pool3"):
+    # ksize:每个维度 输入张量的大小。
     pool3 = tf.nn.max_pool(conv2, ksize = [1, 2, 2, 1], strides = [1, 2, 2, 1], padding = "VALID")
     pool3_flat = tf.reshape(pool3, shape = [-1, pool3_fmaps*7*7])
 
