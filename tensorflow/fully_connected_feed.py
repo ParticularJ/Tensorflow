@@ -1,4 +1,5 @@
 # -*- coding:utf-8 -*-
+
 import argparse
 import os
 import sys
@@ -14,7 +15,7 @@ from tensorflow.examples.tutorials.mnist import mnist
 FLAGS= None
 
 def placeholder_inputs(batch_size):
- """Generate placeholder variables to represent the input tensors.
+  """Generate placeholder variables to represent the input tensors.
   These placeholders are used as inputs by the rest of the model building
   code and will be fed from the downloaded data in the .run() loop, below.
   Args:
@@ -23,10 +24,13 @@ def placeholder_inputs(batch_size):
     images_placeholder: Images placeholder.
     labels_placeholder: Labels placeholder.
   """
-
-    images_placeholder = tf.placeholder(tf.float32, shape=(batch_size, mnist.IMAGE_PIXELS))
-    labels_placeholder = tf.placeholder(tf.int32, shape=(batch_size))
-    return images_placeholder, labels_placeholder
+  # Note that the shapes of the placeholders match the shapes of the full
+  # image and label tensors, except the first dimension is now batch_size
+  # rather than the full size of the train or test data sets.
+  images_placeholder = tf.placeholder(tf.float32, shape=(batch_size,
+                                                         mnist.IMAGE_PIXELS))
+  labels_placeholder = tf.placeholder(tf.int32, shape=(batch_size))
+  return images_placeholder, labels_placeholder
 
 def fill_feed_dict(data_set, images_pl, labels_pl):
     """Fills the feed_dict for training the given step.
@@ -42,12 +46,17 @@ def fill_feed_dict(data_set, images_pl, labels_pl):
   Returns:
     feed_dict: The feed dictionary mapping from placeholders to values.
   """
+
     images_feed, labels_feed = data_set.next_batch(FLAGS.batch_size, FLAGS.fake_data)
-    feed_dict = {images_pl:images_feed, labels_pl:labels_feed}
+    feed_dict = {images_pl: images_feed, labels_pl: labels_feed}
     return feed_dict
 
-def do_eval(sess, eval_correct, images_placeholder, labels_placeholder, data_set):
-     """Runs one evaluation against the full epoch of data.
+def do_eval(sess,
+            eval_correct,
+            images_placeholder,
+            labels_placeholder,
+            data_set):
+  """Runs one evaluation against the full epoch of data.
   Args:
     sess: The session in which the model has been trained.
     eval_correct: The Tensor that returns the number of correct predictions.
@@ -56,18 +65,24 @@ def do_eval(sess, eval_correct, images_placeholder, labels_placeholder, data_set
     data_set: The set of images and labels to evaluate, from
       input_data.read_data_sets().
   """
-    true_count = 0
-    steps_per_epoch = data_set.num_examples
-    num_examples = steps_per_epoch * FLAGS.batch_size
-    for step in xrange(steps_per_epoch):
-        feed_dict = fill_feed_dict(data_set, images_placeholder, labels_placeholder)
-        ture_count += sess.run(eval_correct, feed_dict = feed_dict)
-    precision = float(true_count)/num_examples
-    print(' Num examples: %d Num correct: %d Precision @ 1:%0.04f' % (num_examples, true_count, precision))
+  # And run one epoch of eval.
+  true_count = 0  # Counts the number of correct predictions.
+  steps_per_epoch = data_set.num_examples // FLAGS.batch_size
+  num_examples = steps_per_epoch * FLAGS.batch_size
+  for step in xrange(steps_per_epoch):
+    feed_dict = fill_feed_dict(data_set,
+                               images_placeholder,
+                               labels_placeholder)
+    true_count += sess.run(eval_correct, feed_dict=feed_dict)
+  precision = float(true_count) / num_examples
+  print('  Num examples: %d  Num correct: %d  Precision : %0.04f' %
+        (num_examples, true_count, precision))
+
 
 def run_training():
-    data_sets = input_data.read_data_sets(FLAGS.input_data_dir, FLAGS.fake_data)
+    data_sets = input_data.read_data_sets("FLAG.data_dir", FLAGS.fake_data)
 
+    # 使用多个图的定义
     with tf.Graph().as_default():
         images_placeholder, labels_placeholder = placeholder_inputs(FLAGS.batch_size)
         logits = mnist.inference(images_placeholder, FLAGS.hidden1, FLAGS.hidden2)
@@ -75,7 +90,11 @@ def run_training():
         loss = mnist.loss(logits, labels_placeholder)
         train_op = mnist.training(loss, FLAGS.learning_rate)
         eval_correct = mnist.evaluation(logits, labels_placeholder)
+        # If no summaries were collected, returns None.
+        # Otherwise returns a scalar Tensor of type string containing
+        # the serialized Summary protocol buffer resulting from the merging.
         summary = tf.summary.merge_all()
+
         init = tf.global_variables_initializer()
         saver = tf.train.Saver()
         sess = tf.Session()
@@ -89,7 +108,8 @@ def run_training():
             _, loss_value = sess.run([train_op, loss], feed_dict = feed_dict)
 
             duration = time.time() - start_time
-            
+
+            # TensorBoard
             if step % 100 == 0:
                 print('Step %d: loss = %0.2f(%.3f sec)' % (step, loss_value, duration))
                 summary_str = sess.run(summary, feed_dict = feed_dict)
@@ -97,7 +117,7 @@ def run_training():
                 summary_writer.flush()
 
             if (step + 1) % 1000 == 0 or (step + 1) == FLAGS.max_steps:
-                checkpoint_file = os.path.join(FLAGS.log_dir, 'model.ckpt')
+                checkpoint_file = os.path.join("FLAG.data_dir", 'model.ckpt')
                 saver.save(sess, checkpoint_file, global_step = step)
                 print('Training Data Eval:')
                 do_eval(sess, eval_correct, images_placeholder, labels_placeholder, data_sets.train)
@@ -107,9 +127,9 @@ def run_training():
                 do_eval(sess, eval_correct, images_placeholder, labels_placeholder, data_sets.test)
 
 def main(_):
-    if tf.gfile.Exist(FLAGS.log_dir):
-        tf.gfile.DeleteRecursively(FLAGS.log_dir)
-    tf.gfile.MakeDirs(FLAGS.log_dir)
+   # if tf.gfile.Exists(FLAGS.log_dir):
+    #    tf.gfile.DeleteRecursively(FLAGS.log_dir)
+   # tf.gfile.MakeDirs(FLAGS.log_dir)
     run_training()
 
 if __name__ == '__main__':
