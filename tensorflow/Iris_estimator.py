@@ -37,15 +37,17 @@ def main():
         target_dtype=np.int,
         features_dtype=np.float32
     )
-    # Specify that all features have real-value data
 
+    # Specify that all features have real-value data
+    # 所以tf.feature_column.numeric_column是用来构造特征列的适当函数
     feature_columns = [tf.feature_column.numeric_column("x", shape = [4])]
 
     # Build 3 layer DNN with 10, 20, 10 units respectively.
     classifier = tf.estimator.DNNClassifier(feature_columns=feature_columns,
                                             hidden_units=[10, 20, 10],
                                             n_classes=3,
-                                            model_dir = "tmp/iris_model")
+                                            model_dir = "tmp/iris_model") #The directory in which TensorFlow will save checkpoint data and TensorBoard summaries during model training.
+                                                                        # The directory in which TensorFlow will save checkpoint data and TensorBoard summaries during model training.
     # Define the training inputs
     train_input_fn = tf.estimator.inputs.numpy_input_fn(
         x={"x": np.array(training_set.data)},
@@ -83,6 +85,7 @@ def main():
     )
 
     predictions = list(classifier.predict(input_fn=predict_input_fn))
+    # print tht classes information
     predicted_classes = [p["classes"] for p in predictions]
 
     print(
