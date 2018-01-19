@@ -67,6 +67,7 @@ def do_eval(sess,
   """
   # And run one epoch of eval.
   true_count = 0  # Counts the number of correct predictions.
+  # //表示取整除
   steps_per_epoch = data_set.num_examples // FLAGS.batch_size
   num_examples = steps_per_epoch * FLAGS.batch_size
   for step in xrange(steps_per_epoch):
