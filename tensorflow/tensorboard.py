@@ -10,9 +10,7 @@ FLAGS = None
 
 def train():
     # Import data
-    mnist = input_data.read_data_set("FLAGS.data_dir",
-                                     one_hot=true,
-                                     fake_data=FLAGS.fake_data)
+    mnist = input_data.read_data_sets("FLAG.data_dir", one_hot=True, fake_data=FLAGS.fake_data)
 
     sess = tf.InteractiveSession()
 
@@ -29,7 +27,7 @@ def train():
         return tf.Variable(initial)
 
     def bias_variable(shape):
-        initial = tf.truncated_normal(0.1, shape=shape)
+        initial = tf.constant(0.1, shape=shape)
         return tf.Variable(initial)
 
     def variable_summaries(var):
@@ -67,7 +65,7 @@ def train():
         keep_prob = tf.placeholder(tf.float32)
         tf.summary.scalar('dropout_keep_probability', keep_prob)
         dropped = tf.nn.dropout(hidden1, keep_prob)
-
+    # tf.identity 输出一个与输入完全相同的tensor
     y = nn_layer(dropped, 500, 10, 'layer2', act=tf.identity)
 
     with tf.name_scope('cross_entropy'):
@@ -81,8 +79,10 @@ def train():
 
     with tf.name_scope('accuracy'):
         with tf.name_scope('correct_prediction'):
+            # tf.equal 返回 一个tensor，相等为1，不等为0 如：[true,false,false,true]
             correct_prediction =  tf.equal(tf.argmax(y, 1), tf.argmax(y_, 1))
         with tf.name_scope('accuracy'):
+            # tf.cast 转换数据类型
             accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
     tf.summary.scalar('accuracy', accuracy)
 
@@ -91,6 +91,68 @@ def train():
     test_writer = tf.summary.FileWriter(FLAGS.data_dir + './test')
     tf.global_variables_initializer().run()
 
+    # Train the model, and also write summaries.
+# Every 10th step, measure test-set accuracy, and write test summaries
+# All other steps, run train_step on training data, & add training summaries
 
     def feed_dict(train):
-        
+        if train or FLAGS.fake_data:
+            xs, ys = mnist.train.next_batch(100, fake_data = FLAGS.fake_data)
+            k = FLAGS.dropout
+        else:
+            xs, ys = mnist.test.images, mnist.test.labels
+            k = 1.0
+        return {x: xs, y_: ys, keep_prob: k}
+
+    for i in range(FLAGS.max_steps):
+        if i % 10 == 0:
+            summary, acc = sess.run([merged, accuracy], feed_dict=feed_dict(False))
+            test_writer.add_summary(summary, i)
+            print('Accuracy at step %s: %s' % (i, acc))
+        else:
+            if i % 100 == 99:
+                # ) trace each iteration, e.g. tensorboard > graphs > session runs;
+                # 2) metadata also stores information like run times, memory consumption, e.g.
+                run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+                run_metadata = tf.RunMetadata()
+                summary, _ = sess.run([merged, train_step],
+                                      feed_dict=feed_dict(True),
+                                      options=run_options,
+                                      run_metadata=run_metadata)
+                train_writer.add_run_metadata(run_metadata, 'step%03d' % i)
+                train_writer.add_summary(summary, i)
+                print('Adding run metadata for', i)
+            else:
+                summary, _ = sess.run([merged, train_step], feed_dict=feed_dict(True))
+                train_writer.add_summary(summary, i)
+    train_writer.close()
+    test_writer.close()
+
+def main(_):
+    train()
+
+if __name__ == '__main__':
+  parser = argparse.ArgumentParser()
+  parser.add_argument('--fake_data', nargs='?', const=True, type=bool,
+                      default=False,
+                      help='If true, uses fake data for unit testing.')
+  parser.add_argument('--max_steps', type=int, default=1000,
+                      help='Number of steps to run trainer.')
+  parser.add_argument('--learning_rate', type=float, default=0.001,
+                      help='Initial learning rate')
+  parser.add_argument('--dropout', type=float, default=0.9,
+                      help='Keep probability for training dropout.')
+  parser.add_argument(
+      '--data_dir',
+      type=str,
+      default=os.path.join(os.getenv('TEST_TMPDIR', '/tmp'),
+                           'tensorflow/mnist/input_data'),
+      help='Directory for storing input data')
+  parser.add_argument(
+      '--log_dir',
+      type=str,
+      default=os.path.join(os.getenv('TEST_TMPDIR', '/tmp'),
+                           'tensorflow/mnist/logs/mnist_with_summaries'),
+      help='Summaries log directory')
+  FLAGS, unparsed = parser.parse_known_args()
+  tf.app.run()
