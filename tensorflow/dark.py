@@ -12,6 +12,8 @@ tfnet = TFNet(options)
 #imgcv = cv2.imread("/home/ck/darkflow/sample_img/sample_person.jpg")
 tfnet.camera()
 
+
+# 修改在服务器上，整理过后提交
 #tfnet.predict()
 
 
