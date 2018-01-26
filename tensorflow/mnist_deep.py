@@ -5,7 +5,8 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-
+import cv2
+import numpy as np
 import argparse
 import sys
 import tempfile
@@ -103,6 +104,14 @@ def main(_):
     train_writer = tf.summary.FileWriter(graph_location)
     train_writer.add_graph(tf.get_default_graph())
 
+    im = cv2.imread('03.bmp', cv2.IMREAD_GRAYSCALE).astype(np.float32)
+    im = cv2.resize(im, (28, 28), interpolation=cv2.INTER_CUBIC)
+    img_gray = (im - (255 / 2.0)) / 255
+    img_gray = np.rot90(img_gray)
+    cv2.imshow('out', img_gray)
+    cv2.waitKey(0)
+    x_img = np.reshape(img_gray, [-1, 784])
+
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         for i in range(20000):
@@ -112,8 +121,8 @@ def main(_):
                     x: batch[0], y_: batch[1], keep_prob: 1.0})
                 print('step %d, training acuuracy %g' % (i, train_accuracy))
             train_step.run(feed_dict={x: batch[0], y_: batch[1], keep_prob: 0.5})
-        print('test accuracy %g' % accuracy.eval(feed_dict={
-            x: mnist.test.images, y_: mnist.test.labels, keep_prob : 1.0}))
+        print(sess.eval(y_conv,feed_dict={x: x_img , keep_prob : 1.0}))
+        #save_path = saver.save(sess,"./Model/my_model_final.ckpt")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
