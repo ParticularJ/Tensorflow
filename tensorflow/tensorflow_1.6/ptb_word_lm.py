@@ -1,9 +1,49 @@
+
+"""Example / benchmark for building a PTB LSTM model.
+Trains the model described in:
+(Zaremba, et. al.) Recurrent Neural Network Regularization
+http://arxiv.org/abs/1409.2329
+There are 3 supported model configurations:
+===========================================
+| config | epochs | train | valid  | test
+===========================================
+| small  | 13     | 37.99 | 121.39 | 115.91
+| medium | 39     | 48.45 |  86.16 |  82.07
+| large  | 55     | 37.87 |  82.62 |  78.29
+The exact results may vary depending on the random initialization.
+The hyperparameters used in the model:
+- init_scale - the initial scale of the weights
+- learning_rate - the initial value of the learning rate
+- max_grad_norm - the maximum permissible norm of the gradient
+- num_layers - the number of LSTM layers
+- num_steps - the number of unrolled steps of LSTM
+- hidden_size - the number of LSTM units
+- max_epoch - the number of epochs trained with the initial learning rate
+- max_max_epoch - the total number of epochs for training
+- keep_prob - the probability of keeping weights in the dropout layer
+- lr_decay - the decay of the learning rate for each epoch after "max_epoch"
+- batch_size - the batch size
+- rnn_mode - the low level implementation of lstm cell: one of CUDNN,
+             BASIC, or BLOCK, representing cudnn_lstm, basic_lstm, and
+             lstm_block_cell classes.
+The data required for this example is in the data/ dir of the
+PTB dataset from Tomas Mikolov's webpage:
+$ wget http://www.fit.vutbr.cz/~imikolov/rnnlm/simple-examples.tgz
+$ tar xvf simple-examples.tgz
+To run:
+$ python ptb_word_lm.py --data_path=simple-examples/data/
+"""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import time
 
 import numpy as np
 import tensorflow as tf
 
-import read_ptb
+import read_ptb as reader
+import util
 
 from tensorflow.python.client import device_lib
 
@@ -13,11 +53,16 @@ logging = tf.logging
 flags.DEFINE_string(
 	"model", "small",
 	"A type of model. Possible options are: small, medium, large.")
-flags.DEFINE_string("data_path", None, "Where the training/test data is stored.")
-flags.DEFINE_string("save_path", None, "Model output directory.")
-flags.DEFINE_bool("use_fp16", False, "Train using 16-bit floats instead of 32bit floats")
-flags.DEFINE_integer("num_gpus", 1, "If larger than 1, Grappler AutoParallel optimizer will create multiple training"
-									"replicas with each GPU running one replica.")
+flags.DEFINE_string("data_path", None,
+					"Where the training/test data is stored.")
+flags.DEFINE_string("save_path", None,
+					"Model output directory.")
+flags.DEFINE_bool("use_fp16", False,
+				  "Train using 16-bit floats instead of 32bit floats")
+flags.DEFINE_integer("num_gpus", 1,
+					 "If larger than 1, Grappler AutoParallel optimizer "
+					 "will create multiple training replicas with each GPU "
+					 "running one replica.")
 flags.DEFINE_string("rnn_mode", None,
 					"The low level implementation of lstm cell: one of CUDNN, "
 					"BASIC, and BLOCK, representing cudnn_lstm, basic_lstm, "
@@ -39,11 +84,13 @@ class PTBInput(object):
 		self.batch_size = batch_size = config.batch_size
 		self.num_steps = num_steps = config.num_steps
 		self.epoch_size = ((len(data) // batch_size) - 1) // num_steps
-		self.input_data, self.targets = read_ptb.ptb_producer(data, batch_size, num_steps, name=name)
+		self.input_data, self.targets = reader.ptb_producer(
+			data, batch_size, num_steps, name=name)
 
 
 class PTBModel(object):
 	"""The PTB model."""
+
 	def __init__(self, is_training, config, input_):
 		self._is_training = is_training
 		self._input = input_
@@ -66,11 +113,12 @@ class PTBModel(object):
 
 		softmax_w = tf.get_variable(
 			"softmax_w", [size, vocab_size], dtype=data_type())
-		softmax_b = tf.get_variable(
-			"softmax_b", [vocab_size], dtype=data_type())
+		softmax_b = tf.get_variable("softmax_b", [vocab_size], dtype=data_type())
 		logits = tf.nn.xw_plus_b(output, softmax_w, softmax_b)
+		# Reshape logits to be a 3-D tensor for sequence loss
 		logits = tf.reshape(logits, [self.batch_size, self.num_steps, vocab_size])
 
+		# Use the contrib sequence loss and average over the batches
 		loss = tf.contrib.seq2seq.sequence_loss(
 			logits,
 			input_.targets,
@@ -78,6 +126,7 @@ class PTBModel(object):
 			average_across_timesteps=False,
 			average_across_batch=True)
 
+		# Update the cost
 		self._cost = tf.reduce_sum(loss)
 		self._final_state = state
 
@@ -85,10 +134,13 @@ class PTBModel(object):
 			return
 
 		self._lr = tf.Variable(0.0, trainable=False)
+		# 返回所有trainable=True的变量
 		tvars = tf.trainable_variables()
+		# 防止梯度爆炸或者消失
 		grads, _ = tf.clip_by_global_norm(tf.gradients(self._cost, tvars),
 										  config.max_grad_norm)
 		optimizer = tf.train.GradientDescentOptimizer(self._lr)
+		# apply gradient to variable
 		self._train_op = optimizer.apply_gradients(
 			zip(grads, tvars),
 			global_step=tf.train.get_or_create_global_step())
@@ -111,15 +163,18 @@ class PTBModel(object):
 			num_units=config.hidden_size,
 			input_size=config.hidden_size,
 			dropout=1 - config.keep_prob if is_training else 0)
+		# 返回cudnn所用的缓存区的大小
 		params_size_t = self._cell.params_size()
+		# get_variable 命名重复会报错，而Variable则会的自动处理
 		self._rnn_params = tf.get_variable(
 			"lstm_params",
 			initializer=tf.random_uniform(
 				[params_size_t], -config.init_scale, config.init_scale),
-			validate_shape=False
-		)
-		c = tf.zeros([config.num_layers, self.batch_size, config.hidden_size], tf.float32)
-		h = tf.zeros([config.num_layers, self.batch_size, config.hidden_size], tf.float32)
+			validate_shape=False)
+		c = tf.zeros([config.num_layers, self.batch_size, config.hidden_size],
+					 tf.float32)
+		h = tf.zeros([config.num_layers, self.batch_size, config.hidden_size],
+					 tf.float32)
 		self._initial_state = (tf.contrib.rnn.LSTMStateTuple(h=h, c=c),)
 		outputs, h, c = self._cell(inputs, h, c, self._rnn_params, is_training)
 		outputs = tf.transpose(outputs, [1, 0, 2])
@@ -128,36 +183,48 @@ class PTBModel(object):
 
 	def _get_lstm_cell(self, config, is_training):
 		if config.rnn_mode == BASIC:
-			return tf.contrib.rnn.BasicLSTMCell(
+			return tf.nn.rnn_cell.BasicLSTMCell(
 				config.hidden_size, forget_bias=0.0, state_is_tuple=True,
 				reuse=not is_training)
 		if config.rnn_mode == BLOCK:
 			return tf.contrib.rnn.LSTMBlockCell(
 				config.hidden_size, forget_bias=0.0)
-		raise ValueError("rnn_model %s not supported" % config.rnn_mode)
+		raise ValueError("rnn_mode %s not supported" % config.rnn_mode)
 
 	def _build_rnn_graph_lstm(self, inputs, config, is_training):
 		"""Build the inference graph using canonical LSTM cells."""
+
+		# Slightly better results can be obtained with forget gate biases
+		# initialized to 1 but the hyperparameters of the model would need to be
+		# different than reported in the paper.
 		def make_cell():
 			cell = self._get_lstm_cell(config, is_training)
 			if is_training and config.keep_prob < 1:
-				cell = tf.contrib.rnn.DropoutWrapper(
+				cell = tf.nn.rnn_cell.DropoutWrapper(
 					cell, output_keep_prob=config.keep_prob)
 			return cell
 
-		cell = tf.contrib.rnn.MultiRNNCell(
+		cell = tf.nn.rnn_cell.MultiRNNCell(
 			[make_cell() for _ in range(config.num_layers)], state_is_tuple=True)
-
+		# LSTM 初始化，全为 0
 		self._initial_state = cell.zero_state(config.batch_size, data_type())
 		state = self._initial_state
-
+		# Simplified version of tf.nn.static_rnn().
+		# This builds an unrolled LSTM for tutorial purposes only.
+		# In general, use tf.nn.static_rnn() or tf.nn.static_state_saving_rnn().
+		#
+		# The alternative version of the code below is:
+		#
+		# inputs = tf.unstack(inputs, num=self.num_steps, axis=1)
+		# outputs, state = tf.nn.static_rnn(cell, inputs,
+		#                                   initial_state=self._initial_state)
 		outputs = []
 		with tf.variable_scope("RNN"):
 			for time_step in range(self.num_steps):
-				if time_step > 0:tf.get_variable_scope().reuse_variables()
+				if time_step > 0: tf.get_variable_scope().reuse_variables()
 				(cell_output, state) = cell(inputs[:, time_step, :], state)
 				outputs.append(cell_output)
-		output = tf.reshape(tf.concat(outputs, 1), [-1, config.batch_size])
+		output = tf.reshape(tf.concat(outputs, 1), [-1, config.hidden_size])
 		return output, state
 
 	def assign_lr(self, session, lr_value):
@@ -300,3 +367,150 @@ class TestConfig(object):
 	batch_size = 20
 	vocab_size = 10000
 	rnn_mode = BLOCK
+
+
+def run_epoch(session, model, eval_op=None, verbose=False):
+	"""Runs the model on the given data."""
+	start_time = time.time()
+	costs = 0.0
+	iters = 0
+	state = session.run(model.initial_state)
+
+	fetches = {
+		"cost": model.cost,
+		"final_state": model.final_state,
+	}
+	if eval_op is not None:
+		fetches["eval_op"] = eval_op
+
+	for step in range(model.input.epoch_size):
+		feed_dict = {}
+		for i, (c, h) in enumerate(model.initial_state):
+			feed_dict[c] = state[i].c
+			feed_dict[h] = state[i].h
+
+		vals = session.run(fetches, feed_dict)
+		cost = vals["cost"]
+		state = vals["final_state"]
+
+		costs += cost
+		iters += model.input.num_steps
+
+		if verbose and step % (model.input.epoch_size // 10) == 10:
+			print("%.3f perplexity: %.3f speed: %.0f wps" %
+				  (step * 1.0 / model.input.epoch_size, np.exp(costs / iters),
+				   iters * model.input.batch_size * max(1, FLAGS.num_gpus) /
+				   (time.time() - start_time)))
+
+	return np.exp(costs / iters)
+
+
+def get_config():
+	"""Get model config."""
+	config = None
+	if FLAGS.model == "small":
+		config = SmallConfig()
+	elif FLAGS.model == "medium":
+		config = MediumConfig()
+	elif FLAGS.model == "large":
+		config = LargeConfig()
+	elif FLAGS.model == "test":
+		config = TestConfig()
+	else:
+		raise ValueError("Invalid model: %s", FLAGS.model)
+	if FLAGS.rnn_mode:
+		config.rnn_mode = FLAGS.rnn_mode
+	if FLAGS.num_gpus != 1 or tf.__version__ < "1.3.0":
+		config.rnn_mode = BASIC
+	return config
+
+
+def main(_):
+	if not FLAGS.data_path:
+		raise ValueError("Must set --data_path to PTB data directory")
+	# 显示本地的所有ＧＰＵ
+	gpus = [
+		x.name for x in device_lib.list_local_devices() if x.device_type == "GPU"
+	]
+	# 判断gpu个数是否适合
+	if FLAGS.num_gpus > len(gpus):
+		raise ValueError(
+			"Your machine has only %d gpus "
+			"which is less than the requested --num_gpus=%d."
+			% (len(gpus), FLAGS.num_gpus))
+
+	# 读取原始的数据，并返回对应的ｉｄ
+	raw_data = reader.ptb_raw_data(FLAGS.data_path)
+	train_data, valid_data, test_data, _ = raw_data
+	# 配置文件，模型
+	config = get_config()
+	eval_config = get_config()
+	eval_config.batch_size = 1
+	eval_config.num_steps = 1
+
+	# 建立一个新的默认图
+	with tf.Graph().as_default():
+		initializer = tf.random_uniform_initializer(-config.init_scale,
+													config.init_scale)
+
+		with tf.name_scope("Train"):
+			train_input = PTBInput(config=config, data=train_data, name="TrainInput")
+			with tf.variable_scope("Model", reuse=None, initializer=initializer):
+				m = PTBModel(is_training=True, config=config, input_=train_input)
+			tf.summary.scalar("Training Loss", m.cost)
+			tf.summary.scalar("Learning Rate", m.lr)
+
+		with tf.name_scope("Valid"):
+			valid_input = PTBInput(config=config, data=valid_data, name="ValidInput")
+			with tf.variable_scope("Model", reuse=True, initializer=initializer):
+				mvalid = PTBModel(is_training=False, config=config, input_=valid_input)
+			tf.summary.scalar("Validation Loss", mvalid.cost)
+
+		with tf.name_scope("Test"):
+			test_input = PTBInput(
+				config=eval_config, data=test_data, name="TestInput")
+			with tf.variable_scope("Model", reuse=True, initializer=initializer):
+				mtest = PTBModel(is_training=False, config=eval_config,
+								 input_=test_input)
+
+		models = {"Train": m, "Valid": mvalid, "Test": mtest}
+		for name, model in models.items():
+			model.export_ops(name)
+		# 方便保存一些列的图模型
+		metagraph = tf.train.export_meta_graph()
+		if tf.__version__ < "1.1.0" and FLAGS.num_gpus > 1:
+			raise ValueError("num_gpus > 1 is not supported for TensorFlow versions "
+							 "below 1.1.0")
+		soft_placement = False
+		if FLAGS.num_gpus > 1:
+			soft_placement = True
+			util.auto_parallel(metagraph, m)
+
+	with tf.Graph().as_default():
+		tf.train.import_meta_graph(metagraph)
+		for model in models.values():
+			model.import_ops()
+		sv = tf.train.Supervisor(logdir=FLAGS.save_path)
+		config_proto = tf.ConfigProto(allow_soft_placement=soft_placement)
+		with sv.managed_session(config=config_proto) as session:
+			for i in range(config.max_max_epoch):
+				lr_decay = config.lr_decay ** max(i + 1 - config.max_epoch, 0.0)
+				m.assign_lr(session, config.learning_rate * lr_decay)
+
+				print("Epoch: %d Learning rate: %.3f" % (i + 1, session.run(m.lr)))
+				train_perplexity = run_epoch(session, m, eval_op=m.train_op,
+											 verbose=True)
+				print("Epoch: %d Train Perplexity: %.3f" % (i + 1, train_perplexity))
+				valid_perplexity = run_epoch(session, mvalid)
+				print("Epoch: %d Valid Perplexity: %.3f" % (i + 1, valid_perplexity))
+
+			test_perplexity = run_epoch(session, mtest)
+			print("Test Perplexity: %.3f" % test_perplexity)
+
+			if FLAGS.save_path:
+				print("Saving model to %s." % FLAGS.save_path)
+				sv.saver.save(session, FLAGS.save_path, global_step=sv.global_step)
+
+
+if __name__ == "__main__":
+	tf.app.run()
